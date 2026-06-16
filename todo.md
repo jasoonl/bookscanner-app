@@ -16,6 +16,10 @@
 - [x] Market price lookup from multiple platforms (10 platforms)
 - [x] Add scanned book to My Books list
 - [x] Camera permission handling
+- [x] Enhanced visual scanning overlay with glow effect
+- [x] Pulse animation on barcode detection
+- [x] Loading spinner animation during book lookup
+- [x] Haptic feedback (medium impact on detection, success/error notifications)
 
 ## Book Details
 - [x] Book detail screen (cover, title, author, ISBN, description)

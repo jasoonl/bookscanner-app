@@ -14,6 +14,11 @@ import type { ScannedBook } from "@/shared/types";
 const { width, height } = Dimensions.get("window");
 const SCAN_FRAME_SIZE = width * 0.72;
 
+// Animation values for enhanced scanner
+const CORNER_SIZE = 28;
+const SCAN_LINE_WIDTH = 2;
+const PULSE_SCALE = 1.15;
+
 export default function ScannerTab() {
   const colors = useColors();
   const { state, dispatch } = useAppStore();
@@ -25,6 +30,9 @@ export default function ScannerTab() {
   const [error, setError] = useState<string | null>(null);
   const slideAnim = useRef(new Animated.Value(400)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const loadingSpinAnim = useRef(new Animated.Value(0)).current;
+  const frameGlowAnim = useRef(new Animated.Value(0)).current;
 
   // Activate camera only when tab is focused
   useFocusEffect(
@@ -39,11 +47,37 @@ export default function ScannerTab() {
   );
 
   const startScanAnimation = () => {
+    // Scan line animation
     Animated.loop(
       Animated.sequence([
         Animated.timing(scanLineAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
         Animated.timing(scanLineAnim, { toValue: 0, duration: 2000, useNativeDriver: true }),
       ])
+    ).start();
+
+    // Frame glow pulse animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(frameGlowAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
+        Animated.timing(frameGlowAnim, { toValue: 0, duration: 1500, useNativeDriver: true }),
+      ])
+    ).start();
+  };
+
+  const startPulseAnimation = () => {
+    Animated.sequence([
+      Animated.timing(pulseAnim, { toValue: PULSE_SCALE, duration: 150, useNativeDriver: true }),
+      Animated.timing(pulseAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const startLoadingSpinAnimation = () => {
+    Animated.loop(
+      Animated.timing(loadingSpinAnim, {
+        toValue: 1,
+        duration: 2000,
+        useNativeDriver: true,
+      })
     ).start();
   };
 
@@ -74,22 +108,41 @@ export default function ScannerTab() {
     setIsLoading(true);
     setError(null);
 
+    // Start pulse animation on detection
+    startPulseAnimation();
+
+    // Haptic feedback on barcode detection
     if (Platform.OS !== "web") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
+
+    // Start loading spin animation
+    startLoadingSpinAnimation();
 
     try {
       const book = await lookupBook(data);
       if (book) {
         setScannedBook(book);
+        // Success haptic feedback
+        if (Platform.OS !== "web") {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
         showResultCard();
       } else {
         setError(`No book found for barcode: ${data}`);
         setScanned(false);
+        // Error haptic feedback
+        if (Platform.OS !== "web") {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
       }
     } catch (err) {
       setError("Failed to look up book. Please try again.");
       setScanned(false);
+      // Error haptic feedback
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -117,6 +170,16 @@ export default function ScannerTab() {
   const scanLineTranslate = scanLineAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, SCAN_FRAME_SIZE - 4],
+  });
+
+  const frameGlowOpacity = frameGlowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 0.8],
+  });
+
+  const loadingRotate = loadingSpinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
   });
 
   // Permission not determined yet
@@ -169,7 +232,27 @@ export default function ScannerTab() {
           <View style={[styles.overlaySide, { backgroundColor: "rgba(0,0,0,0.55)" }]} />
 
           {/* Scan Frame */}
-          <View style={[styles.scanFrame, { width: SCAN_FRAME_SIZE, height: SCAN_FRAME_SIZE * 0.65 }]}>
+          <Animated.View 
+            style={[
+              styles.scanFrame, 
+              { 
+                width: SCAN_FRAME_SIZE, 
+                height: SCAN_FRAME_SIZE * 0.65,
+                transform: [{ scale: pulseAnim }],
+              }
+            ]}
+          >
+            {/* Glow background (pulsing) */}
+            <Animated.View
+              style={[
+                styles.scanFrameGlow,
+                {
+                  opacity: frameGlowOpacity,
+                  borderColor: "#F59E0B",
+                },
+              ]}
+            />
+
             {/* Corner brackets */}
             {[
               { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
@@ -187,7 +270,7 @@ export default function ScannerTab() {
                 { transform: [{ translateY: scanLineTranslate }] },
               ]}
             />
-          </View>
+          </Animated.View>
 
           <View style={[styles.overlaySide, { backgroundColor: "rgba(0,0,0,0.55)" }]} />
         </View>
@@ -197,7 +280,13 @@ export default function ScannerTab() {
           <Text style={styles.scanHint}>Point camera at a book barcode or ISBN</Text>
           {isLoading && (
             <View style={styles.loadingRow}>
-              <ActivityIndicator color="#F59E0B" size="small" />
+              <Animated.View
+                style={{
+                  transform: [{ rotate: loadingRotate }],
+                }}
+              >
+                <View style={styles.loadingSpinner} />
+              </Animated.View>
               <Text style={styles.loadingText}>Looking up book...</Text>
             </View>
           )}
@@ -315,6 +404,20 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
+  scanFrameGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderWidth: 2,
+    borderRadius: 4,
+    shadowColor: "#F59E0B",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 8,
+  },
   corner: {
     position: "absolute",
     width: 24,
@@ -347,6 +450,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   loadingText: { color: "#F59E0B", fontSize: 14, fontWeight: "500" },
+  loadingSpinner: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "rgba(245, 158, 11, 0.3)",
+    borderTopColor: "#F59E0B",
+  },
   errorRow: { alignItems: "center", marginTop: 12, gap: 8 },
   errorText: { color: "#F87171", fontSize: 13, textAlign: "center" },
   retryText: { color: "#F59E0B", fontSize: 14, fontWeight: "600" },
